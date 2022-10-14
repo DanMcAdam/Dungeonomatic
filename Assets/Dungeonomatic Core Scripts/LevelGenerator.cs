@@ -17,7 +17,7 @@ namespace ProceduralTileDungeonGenerator
         bool regenerate = false;
 
         [TextArea(3, 10)]
-        public string debugMessage = "This is a debug message for the  cool ";
+        public string debugMessage = "This is a debug message for the cool ";
 
         public bool keepGoing = false, finishGen = false;
 
@@ -32,8 +32,6 @@ namespace ProceduralTileDungeonGenerator
         int numberOfRoomsCreated = 0;
         int targetNumberOfRooms;
 
-        float timer = 0;
-
 
         TileNode alignNode;
         TileNode targetNode;
@@ -42,8 +40,6 @@ namespace ProceduralTileDungeonGenerator
         private Dictionary<TileNode, Vector3> nodeMap = new Dictionary<TileNode, Vector3>();
         private Dictionary<(TileNode, TileNode), bool> attemptedPairings = new Dictionary<(TileNode, TileNode), bool>();
         private List<Tile> allTiles = new List<Tile>();
-
-        public NavMeshBuildSettings buildSettings;
 
         void Start()
         {
@@ -118,53 +114,53 @@ namespace ProceduralTileDungeonGenerator
             return newTile;
         }
 
-        private async UniTask<Tile> PlaceTile(Tile newRoom, Tile room)
+        private async UniTask<Tile> PlaceTile(Tile newTile, Tile oldTile)
         {
             attemptedPairings.Clear();
 
-            foreach (TileNode node in room.Nodes)
+            foreach (TileNode node in oldTile.Nodes)
             {
-                foreach (TileNode innerNode in newRoom.Nodes)
+                foreach (TileNode innerNode in newTile.Nodes)
                 {
                     print("loop of adding node");
                     attemptedPairings.Add((innerNode, node), false);
                 }
             }
-            await ChoosePointAndMove(newRoom, room);
+            await ChoosePointAndMove(newTile, oldTile);
 
             await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
-            while (newRoom.CheckForTileCollision())
+            while (newTile.CheckForTileCollision())
             {
                 debugMessage = "Collision detected, retrying";
                 attemptedPairings[(alignNode, targetNode)] = true;
                 if (!attemptedPairings.ContainsValue(false))
                 {
-                    Destroy(newRoom.gameObject);
+                    Destroy(newTile.gameObject);
                     await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
                     print("Destroyed new room, attempting again");
                     attemptedPairings.Clear();
-                    newRoom = ChooseTile();
-                    foreach (TileNode node in room.Nodes)
+                    newTile = ChooseTile();
+                    foreach (TileNode node in oldTile.Nodes)
                     {
-                        foreach (TileNode innerNode in newRoom.Nodes)
+                        foreach (TileNode innerNode in newTile.Nodes)
                         {
                             attemptedPairings.Add((innerNode, node), false);
                         }
                     }
                 }
-                await ChoosePointAndMove(newRoom, room);
+                await ChoosePointAndMove(newTile, oldTile);
                 await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
             }
 
-            allTiles.Add(newRoom);
+            allTiles.Add(newTile);
 
-            foreach (TileNode node in newRoom.Nodes)
+            foreach (TileNode node in newTile.Nodes)
             {
                 nodeMap.Add(node, node.transform.position);
             }
 
             numberOfRoomsCreated++;
-            return newRoom;
+            return newTile;
         }
 
         private async UniTask ChoosePointAndMove(Tile newRoom, Tile room)
