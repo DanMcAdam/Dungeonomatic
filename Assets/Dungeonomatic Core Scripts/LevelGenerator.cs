@@ -55,14 +55,8 @@ namespace ProceduralTileDungeonGenerator
         private void BeginGeneration()
         {
             character.SetActive(false);
-            Physics.autoSimulation = false;
-            debugMessage = "Beginning generation, physics stopped";
+            debugMessage = "Beginning generation";
             StartGen();
-        }
-
-        private void FixedUpdate()
-        {
-            timer += Time.fixedDeltaTime;
         }
 
         private async UniTaskVoid StartGen()
@@ -109,7 +103,6 @@ namespace ProceduralTileDungeonGenerator
 
                 }
             }
-            Physics.autoSimulation = true;
 
             character.transform.position = allTiles[0].spawnPoint;
             character.SetActive(true);
@@ -139,7 +132,7 @@ namespace ProceduralTileDungeonGenerator
             }
             await ChoosePointAndMove(newRoom, room);
 
-            Physics.Simulate(timer);
+            await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
             while (newRoom.CheckForTileCollision())
             {
                 debugMessage = "Collision detected, retrying";
@@ -147,7 +140,7 @@ namespace ProceduralTileDungeonGenerator
                 if (!attemptedPairings.ContainsValue(false))
                 {
                     Destroy(newRoom.gameObject);
-                    Physics.Simulate(timer);
+                    await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
                     print("Destroyed new room, attempting again");
                     attemptedPairings.Clear();
                     newRoom = ChooseTile();
@@ -160,7 +153,7 @@ namespace ProceduralTileDungeonGenerator
                     }
                 }
                 await ChoosePointAndMove(newRoom, room);
-                Physics.Simulate(timer);
+                await UniTask.Yield(PlayerLoopTiming.LastFixedUpdate);
             }
 
             allTiles.Add(newRoom);
@@ -244,7 +237,6 @@ namespace ProceduralTileDungeonGenerator
                 character.SetActive(false);
                 nodeMap.Clear();
                 allTiles.Clear();
-                Physics.autoSimulation = false;
                 BeginGeneration();
                 regenerate = false;
             }
