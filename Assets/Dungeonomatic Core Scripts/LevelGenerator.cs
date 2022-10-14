@@ -4,6 +4,8 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.AI;
 using UnityEditor.AI;
+using Cysharp.Threading.Tasks;
+
 namespace ProceduralTileDungeonGenerator
 {
     public class LevelGenerator : MonoBehaviour
@@ -26,8 +28,6 @@ namespace ProceduralTileDungeonGenerator
         public GameObject spawnRoom;
 
         public GameObject character;
-        private Tile room = null;
-        private Tile newRoom = null;
         int roomNumberChoice;
         int numberOfRoomsCreated = 0;
         int targetNumberOfRooms;
@@ -47,7 +47,6 @@ namespace ProceduralTileDungeonGenerator
 
         void Start()
         {
-
             BeginGeneration();
         }
 
@@ -58,7 +57,7 @@ namespace ProceduralTileDungeonGenerator
             character.SetActive(false);
             Physics.autoSimulation = false;
             debugMessage = "Beginning generation, physics stopped";
-            StartCoroutine(StartGen());
+            StartGen();
         }
 
         private void FixedUpdate()
@@ -66,25 +65,29 @@ namespace ProceduralTileDungeonGenerator
             timer += Time.fixedDeltaTime;
         }
 
-        private IEnumerator StartGen()
+        private async UniTaskVoid StartGen()
         {
+            Tile oldTile;
+            Tile newTile;
             numberOfRoomsCreated = 1;
             targetNumberOfRooms = Random.Range(baseNumberOfRooms - roomNumberVariation, baseNumberOfRooms + roomNumberVariation);
 
-            room = Instantiate(spawnRoom).GetComponent<Tile>();
+            oldTile = Instantiate(spawnRoom).GetComponent<Tile>();
 
-            foreach (TileNode node in room.Nodes)
+            foreach (TileNode node in oldTile.Nodes)
             {
                 nodeMap.Add(node, node.transform.position);
             }
 
-            allTiles.Add(room);
-            room.transform.SetParent(transform);
+            allTiles.Add(oldTile);
+            oldTile.transform.SetParent(transform);
 
             bool finished = false;
             while (!finished)
             {
-                yield return PlaceTile();
+                newTile = ChooseTile();
+                newTile = await PlaceTile(newTile, oldTile);
+                oldTile = newTile;
                 if (numberOfRoomsCreated == targetNumberOfRooms)
                 {
                     finished = true;
@@ -107,138 +110,106 @@ namespace ProceduralTileDungeonGenerator
                 }
             }
             Physics.autoSimulation = true;
-            /*
-            buildSettings = new NavMeshBuildSettings() { agentRadius = 1f, agentHeight = 2, agentSlope = 45, agentClimb = .75f, agentTypeID = 0 };
-            UnityEditor.AI.NavMeshBuilder.ClearAllNavMeshes();
-            List<NavMeshBuildSource> navSources = new List<NavMeshBuildSource>();
-            MeshFilter[] meshes = GetComponentsInChildren<MeshFilter>();
-            foreach (MeshFilter mesh in meshes)
-            {
-                navSources.Add(new NavMeshBuildSource() { shape = NavMeshBuildSourceShape.Mesh, transform = mesh.transform.localToWorldMatrix, sourceObject = mesh.mesh });
-            }
-            //UnityEngine.AI.NavMeshBuilder.CollectSources(new Bounds(Vector3.zero, new Vector3(99999, 9999, 9999)), LayerMask.NameToLayer("Default"), NavMeshCollectGeometry.PhysicsColliders, 0, new List<NavMeshBuildMarkup>(){ new NavMeshBuildMarkup() { area = 0, ignoreFromBuild = false, overrideArea = false, root = this.transform } }, navSources);
-            UnityEngine.AI.NavMeshBuilder.BuildNavMeshData(buildSettings, navSources, new Bounds(Vector3.zero, new Vector3(99999, 9999, 9999)), Vector3.zero, Quaternion.identity);
-            UnityEditor.AI.NavMeshBuilder.BuildNavMesh();
-            */
+
             character.transform.position = allTiles[0].spawnPoint;
             character.SetActive(true);
             character.GetComponentInChildren<NavMeshAgentTest>().goal.transform.position = allTiles[allTiles.Count - 1].Nodes[0].transform.position;
-            yield break;
+            await UniTask.Yield();
         }
 
-        private void CreateRoom()
+        private Tile ChooseTile()
         {
-            StartCoroutine(PlaceTile());
-            //int roomNumberChoice = PlaceTile(newRoom);
+            int roomToInstantiate = Random.Range(0, prefab.Length);
+            Tile newTile = Instantiate(prefab[roomToInstantiate]).GetComponent<Tile>();
+            newTile.transform.SetParent(transform);
+            return newTile;
         }
 
-        private IEnumerator PlaceTile()
+        private async UniTask<Tile> PlaceTile(Tile newRoom, Tile room)
         {
-            int roomToInstantiate;
-            yield return GenerateNewRoom();
+            attemptedPairings.Clear();
 
-            Quaternion rot;
-
-            Vector3 alignOffset;
-
-            GameObject targetRoom = room.gameObject;
-            int roomNumberChoice;
-
-            yield return TryPlaceTile();
-
-            IEnumerator wait()
+            foreach (TileNode node in room.Nodes)
             {
-                yield return new WaitUntil(() => keepGoing == true);
-                keepGoing = finishGen;
-            }
-
-            IEnumerator GenerateNewRoom()
-            {
-                roomToInstantiate = Random.Range(0, prefab.Length);
-                newRoom = Instantiate(prefab[roomToInstantiate]).GetComponent<Tile>();
-                newRoom.transform.SetParent(transform);
-
-                yield return null;
-            }
-
-            IEnumerator TryPlaceTile()
-            {
-                attemptedPairings.Clear();
-
-                foreach (TileNode node in room.Nodes)
+                foreach (TileNode innerNode in newRoom.Nodes)
                 {
-                    foreach (TileNode innerNode in newRoom.Nodes)
-                    {
-                        print("loop of adding node");
-                        attemptedPairings.Add((innerNode, node), false);
-                    }
+                    print("loop of adding node");
+                    attemptedPairings.Add((innerNode, node), false);
                 }
-                yield return choosePointAndMove();
+            }
+            await ChoosePointAndMove(newRoom, room);
 
-                Physics.Simulate(timer);
-                while (newRoom.CheckForTileCollision())
+            Physics.Simulate(timer);
+            while (newRoom.CheckForTileCollision())
+            {
+                debugMessage = "Collision detected, retrying";
+                attemptedPairings[(alignNode, targetNode)] = true;
+                if (!attemptedPairings.ContainsValue(false))
                 {
-                    debugMessage = "Collision detected, retrying";
-                    attemptedPairings[(alignNode, targetNode)] = true;
-                    if (!attemptedPairings.ContainsValue(false))
+                    Destroy(newRoom.gameObject);
+                    Physics.Simulate(timer);
+                    print("Destroyed new room, attempting again");
+                    attemptedPairings.Clear();
+                    newRoom = ChooseTile();
+                    foreach (TileNode node in room.Nodes)
                     {
-                        Destroy(newRoom.gameObject);
-                        Physics.Simulate(timer);
-                        print("Destroyed new room, attempting again");
-                        attemptedPairings.Clear();
-                        yield return GenerateNewRoom();
-                        foreach (TileNode node in room.Nodes)
+                        foreach (TileNode innerNode in newRoom.Nodes)
                         {
-                            foreach (TileNode innerNode in newRoom.Nodes)
-                            {
-                                attemptedPairings.Add((innerNode, node), false);
-                            }
+                            attemptedPairings.Add((innerNode, node), false);
                         }
                     }
-                    yield return choosePointAndMove();
-                    Physics.Simulate(timer);
                 }
-
-                allTiles.Add(newRoom);
-                room = newRoom;
-
-                foreach (TileNode node in room.Nodes)
-                {
-                    nodeMap.Add(node, node.transform.position);
-                }
-
-                numberOfRoomsCreated++;
-                yield break;
+                await ChoosePointAndMove(newRoom, room);
+                Physics.Simulate(timer);
             }
 
-            IEnumerator choosePointAndMove()
+            allTiles.Add(newRoom);
+
+            foreach (TileNode node in newRoom.Nodes)
             {
-                do
-                {
-                    roomNumberChoice = Random.Range(0, room.Nodes.Length);
-
-                    targetNode = room.Nodes[roomNumberChoice];
-                    alignNode = newRoom.Nodes[Random.Range(0, newRoom.Nodes.Length)];
-
-
-                }
-                while (attemptedPairings[(alignNode, targetNode)] == true);
-                rot = Quaternion.FromToRotation(alignNode.transform.forward, -targetNode.transform.forward);
-                rot.x = 0;
-                rot.z = 0;
-
-                debugMessage = "about to rotate";
-                yield return wait();
-
-                newRoom.transform.rotation = newRoom.transform.rotation * rot;
-
-                alignOffset = newRoom.transform.position - alignNode.transform.position;
-
-                debugMessage = "just rotated, about to place";
-                yield return wait();
-
-                newRoom.transform.position = targetNode.transform.position + alignOffset;
+                nodeMap.Add(node, node.transform.position);
             }
+
+            numberOfRoomsCreated++;
+            return newRoom;
+        }
+
+        private async UniTask ChoosePointAndMove(Tile newRoom, Tile room)
+        {
+            Quaternion rot;
+            do
+            {
+                roomNumberChoice = Random.Range(0, room.Nodes.Length);
+
+                targetNode = room.Nodes[roomNumberChoice];
+                alignNode = newRoom.Nodes[Random.Range(0, newRoom.Nodes.Length)];
+
+
+            }
+            while (attemptedPairings[(alignNode, targetNode)] == true);
+            rot = Quaternion.FromToRotation(alignNode.transform.forward, -targetNode.transform.forward);
+            rot.x = 0;
+            rot.z = 0;
+
+            debugMessage = "about to rotate";
+            await Wait();
+
+            newRoom.transform.rotation = newRoom.transform.rotation * rot;
+
+            Vector3 alignOffset = newRoom.transform.position - alignNode.transform.position;
+
+            debugMessage = "just rotated, about to place";
+            await Wait();
+
+            newRoom.transform.position = targetNode.transform.position + alignOffset;
+            await UniTask.Yield();
+        }
+
+        private async UniTask Wait()
+        {
+            keepGoing = finishGen;
+            await UniTask.WaitUntil(() => keepGoing == true);
+            await UniTask.Yield();
         }
 
         private void OnGUI()
