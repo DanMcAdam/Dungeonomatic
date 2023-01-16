@@ -2,6 +2,8 @@
 A procedural tile-based dungeon generator for Unity Developers 
 
 # Current Status
+Status update 1/15/2023: This project is on a temporary hiatus, I'm currently working on a roguelight game that will need a dungeon generator and the current plan is to return to this project when the time comes to start working on level generation. That project can be seen here, and a webGL build is available in the Readme https://github.com/DanMcAdam/Project-Reborn-Rain
+
 I just finished a major refactor on the project, switching the code that runs the generator itself to Unitask to replace the coroutine solution that was required before. Unitask is an async/await plugin that's compatible with WebGL builds (unlike traditional C# async/await). This provides several advantages over coroutines, including performance, but primarily it allowed me to write cleaner code. I also updated the project to Unity 2021.1.3.11f1, which is the current stable branch, in order to allow use of the UI builder. Lastly, I figured out how to make the Unity experimental Navmesh components execute from the dungeon generator rather than having them prebake in the prefabs. This allows me to bypass the NavMesh Links, which were finicky to set up caused some annoying bugs with movement (that could be bypassed with some custom movement scripting). This is a much more user friendly and reliable workflow. 
 
 # ROADMAP
